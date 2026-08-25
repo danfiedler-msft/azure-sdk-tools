@@ -24,7 +24,7 @@ The emerging end state is:
 
 ```mermaid
 flowchart LR
-    READY["Service indicates release readiness"] --> REQUEST["Canonical review trigger"]
+    START["Review initiation signal (TBD)"] --> REQUEST["Canonical review trigger"]
     REQUEST --> ARH["ARH creates or updates review PR"]
     ARH --> REVIEW["Architect reviews API diff"]
     REVIEW --> RECORD["ARH records decision against API hash"]
@@ -42,12 +42,16 @@ integration are not yet settled. Those decisions are the focus of this document.
 
 - **Working PR:** The pull request in an `azure-sdk-for-<language>` repository
   containing the SDK intended to merge and release.
-- **Review PR:** An ARH-managed pull request containing the reviewable API diff. It
-  is a review artifact and is not merged.
+- **Review PR:** An ARH-managed pull request containing the reviewable API diff.
+  Although its synthetic branches can technically be merged, doing so has no effect
+  on an SDK codebase and both branches are eventually deleted. The expected workflow
+  is to close the review PR rather than merge it.
 - **API hash:** The identifier for the exact API surface reviewed. Approval of one
   hash does not approve a changed surface.
-- **Projection:** GitHub labels or project fields derived from ARH state for
-  visibility and routing. A projection is not an approval record.
+- **Projection:** GitHub labels or project fields that communicate and filter ARH
+  state. The approval action originates in GitHub, ARH stores the resulting decision
+  against the API hash, and ARH projects labels back to GitHub. The projection is
+  not the approval record.
 - **SDK review issue:** The current coordinating issue in `Azure/azure-sdk` used for
   intake, artifact validation, language grouping, assignment, and approval tracking.
 - **Canonical service identity:** A stable identifier used to correlate language
@@ -59,15 +63,15 @@ integration are not yet settled. Those decisions are the focus of this document.
 
 | # | Design area | Emerging direction | Decision still required |
 |---|-------------|--------------------|-------------------------|
-| 1 | Source of truth | ARH record bound to API hash | Identify and migrate every consumer of approval labels |
+| 1 | Source of truth | ARH record bound to API hash | Migrate APIView release consumers and inventory informational label consumers |
 | 2 | SDK review issues | Retire after capability parity | Confirm whether any intake or coordination purpose remains |
-| 3 | Architect dashboard | Azure organization project backed by ARH | Define fields, filtering, grouping, and ownership |
-| 4 | Review trigger | Trigger at release readiness | Select one canonical trigger and explicit fallback |
-| 5 | SDK coverage | One contract independent of SDK origin | Define artifact production for non-TypeSpec paths |
-| 6 | Review artifact | ARH review PR from working branch | Confirm APIView retirement and update behavior |
-| 7 | Approval semantics | Explicit ARH states projected to GitHub | Finalize labels and GitHub review interpretation |
+| 3 | Architect dashboard | [Azure organization project POC](https://github.com/orgs/Azure/projects/1018/views/4) backed by ARH | Validate fields, filtering, grouping, and ownership |
+| 4 | Review trigger | No canonical trigger selected | Decide among explicit and automated initiation paths |
+| 5 | SDK coverage | ARH is independent of SDK origin | Define how non-generated SDK reviews are initiated |
+| 6 | Review artifact | ARH review PR associated with a working PR | Confirm APIView retirement and review PR lifecycle |
+| 7 | Approval semantics | GitHub activity stored in ARH and projected back to GitHub | Finalize labels and qualifying GitHub activity |
 | 8 | Release integration | Gate on exact approved API hash | Define when approval is required and which system enforces it |
-| 9 | Governance boundary | ARH owns SDK Architecture Board review only | Confirm package-name ownership and interfaces to other boards |
+| 9 | Governance boundary | ARH stores SDK API and package-name approvals | Define GitHub package-name actions and interfaces to other boards |
 
 ---
 
@@ -79,11 +83,11 @@ What is the authoritative approval record?
 
 ### Current state
 
-- SDK review issues track per-language approval with labels such as
-  `<lang>-api-approved`.
-- APIView contains the reviewed API artifact and discussion separately.
-- Release and coordination workflows consume labels or workflow state.
-- A label does not prove which API surface was reviewed.
+- APIView is the authoritative SDK API approval record.
+- Release gates consult APIView. They do not consult SDK review issue labels,
+  GitHub review state, or Azure DevOps work items.
+- SDK review issues display per-language labels such as `<lang>-api-approved`, but
+  those labels are informational for service teams.
 
 ### Proposed direction
 
@@ -102,9 +106,9 @@ ARH approval record (authoritative)
 
 ### Required decisions
 
-- [ ] Inventory every release, dashboard, bot, and workflow consumer of current
-  approval labels.
-- [ ] Decide the transition contract for consumers that cannot query ARH initially.
+- [ ] Inventory APIView consumers and any dashboards, bots, or workflows that use
+  informational approval labels.
+- [ ] Decide the transition contract for release gates moving from APIView to ARH.
 - [ ] Define stale-approval invalidation when the working API hash changes.
 - [ ] Define ARH availability and failure behavior for a blocking release gate.
 - [ ] Confirm the audit-retention requirements for approval records.
@@ -126,7 +130,7 @@ Can the `Azure/azure-sdk` SDK review issue workflow be completely retired?
 | Cross-language grouping | Canonical service identity on the dashboard |
 | Review readiness | ARH review state |
 | Architect assignment | ARH routing configuration |
-| Approval tracking | API-hash decision in ARH |
+| Approval visibility | ARH state projected to the issue or dashboard |
 | Completion | ARH closes or archives review artifacts according to policy |
 | Scheduling / Bookings | Release-readiness integration or explicit fallback |
 | Audit history | ARH record plus review PR conversation |
@@ -134,8 +138,9 @@ Can the `Azure/azure-sdk` SDK review issue workflow be completely retired?
 ### Proposed direction
 
 Retire the issue workflow once ARH and the dashboard have demonstrated capability
-parity. During migration, the issue may remain a compatibility view, but it must not
-be an independent approval source or release gate.
+parity. The issue has never been an authoritative approval source; during migration
+it may remain only as a compatibility coordination view. APIView remains
+authoritative until the release gate cuts over to ARH.
 
 ### Required decisions
 
@@ -147,8 +152,8 @@ be an independent approval source or release gate.
 - [ ] What happens to Bookings and already scheduled reviews?
 - [ ] Are historical issues retained as read-only records?
 
-This is the central replacement decision: if the issue retains approval or grouping
-responsibility, the target experience is still a parallel process.
+This is the central replacement decision: if the issue retains intake or grouping
+responsibility, the target experience still has a parallel coordination process.
 
 ---
 
@@ -160,9 +165,10 @@ What becomes the architect's primary work queue?
 
 ### Proposed direction
 
-The Azure SDK Architecture Board project becomes the review queue, ownership view,
-and status view across ARH review PRs. It is a view over ARH state, not a second
-workflow engine.
+The [Azure SDK Architecture Board ARH view
+POC](https://github.com/orgs/Azure/projects/1018/views/4) becomes the review queue,
+ownership view, and status view across ARH review PRs. It is a view over ARH state,
+not a second workflow engine.
 
 The dashboard must answer:
 
@@ -182,7 +188,7 @@ The dashboard must answer:
 | View by service | Canonical service identity |
 | Group related languages | Service identity plus release/correlation ID |
 | Navigate to implementation | Working PR association |
-| Preserve release context | Release plan association, when present |
+| Correlate one release internally | Release or review correlation ID managed by automation |
 
 ### Service grouping decision
 
@@ -193,17 +199,18 @@ not a durable grouping key.
 Preferred contract:
 
 ```text
-canonical-service-id + release-plan-id
+canonical-service-id + release-correlation-id
     -> language
         -> package/namespace
             -> review PR
 ```
 
-For paths without a release plan, ARH needs a review correlation ID.
+Release-plan metadata may supply this correlation internally, but architects should
+not need to open or see Azure DevOps release-plan work items.
 
 ### Required decisions
 
-- [ ] What system owns the canonical service identity: release planner, Service
+- [ ] What system owns the canonical service identity: release automation, Service
   Tree, package metadata, or ARH?
 - [ ] Which Azure-owned repository hosts production ARH review PRs so the
   organization project can index them?
@@ -228,21 +235,22 @@ What single event causes ARH to create or update a review?
 | Option | Advantages | Risks |
 |--------|------------|-------|
 | Working PR label | Simple, explicit, works across SDK origins | Manual and inconsistently applied |
-| Release planner action | Carries release and service context | Depends on release-plan coverage and adds a tool step |
+| Release planner guidance plus Azure SDK agent query | Carries release and service context | Dashboard is read-only; service team must manually run the suggested agent query |
 | `azsdk` command | Explicit and usable from local or agent workflows | Discoverability and training burden |
-| Automated release workflow | Lowest service-team effort; aligns with release readiness | May start too late and may miss nonstandard workflows |
+| Automated release-readiness trigger | Lowest service-team effort and aligns with release preparation | Signal and coverage across release paths are not yet defined |
 
 ### Proposed direction
 
-Use an automated release-readiness signal as the canonical trigger, provided it
-occurs before merge and supports all normal release paths. Keep one explicit fallback
-for exceptional or no-release-plan workflows.
+No canonical trigger has been selected. An automated release-readiness trigger should
+be evaluated alongside the explicit options above. If selected, it must occur before
+merge, support normal release paths, and retain one explicit fallback for exceptional
+workflows.
 
 ### Required decisions
 
 - [ ] What exact pre-merge event represents release readiness?
-- [ ] Is the fallback a working PR label, release planner action, or `azsdk`
-  command?
+- [ ] If automation is selected, is the fallback a working PR label, release
+  planner-guided agent query, or `azsdk` command?
 - [ ] Who is authorized to request, cancel, or restart a review?
 - [ ] Does a new commit update the existing review or create a new review?
 - [ ] How are abandoned and superseded requests detected?
@@ -252,11 +260,15 @@ fallback may call the same idempotent ARH request contract.
 
 ---
 
-## 5. Generated and non-generated SDK coverage
+## 5. Review initiation across SDK origins
 
 ### Decision needed
 
-How does ARH cover every SDK path without becoming TypeSpec- or release-agent-only?
+How is an ARH review initiated for each SDK path?
+
+ARH itself is already independent of TypeSpec and the release agent. The remaining
+gap is the caller and trigger that create or update an ARH review for each path,
+especially manually authored and locally generated SDK PRs.
 
 ### Required scenarios
 
@@ -267,10 +279,9 @@ How does ARH cover every SDK path without becoming TypeSpec- or release-agent-on
 - Customization-only or dependency release with no spec change.
 - Storage-style or other team-owned handoff workflow.
 
-### Proposed direction
+### Existing ARH contract
 
-The ARH request contract starts from a working SDK PR and API artifact, not from a
-TypeSpec project:
+ARH starts from a working SDK PR and API artifact, not from a TypeSpec project:
 
 ```text
 repository + working PR + language + package/namespace
@@ -278,15 +289,15 @@ repository + working PR + language + package/namespace
     + optional release plan
 ```
 
-Generation-specific systems are adapters that supply this contract. They do not
-define separate review processes.
+Generation-specific systems can invoke this same contract. They do not require
+separate approval models.
 
 ### Required decisions
 
-- [ ] How is a deterministic API artifact produced for each non-TypeSpec path?
-- [ ] Can ARH generate the artifact from the working branch on demand?
+- [ ] What invokes ARH today for manually authored and locally generated SDK PRs?
+- [ ] Which canonical trigger should invoke ARH for those paths in the target flow?
 - [ ] What metadata is mandatory when no release plan exists?
-- [ ] Who owns failures where an SDK cannot produce a reviewable artifact?
+- [ ] Does any SDK path still lack a deterministic API artifact?
 
 ---
 
@@ -303,9 +314,10 @@ Architects often review autorevisions after merge rather than a working PR.
 
 ### Proposed direction
 
-ARH creates or updates a synthetic review PR containing an `API.md` diff generated
-from the working branch. Architects review only that PR for SDK API approval. The
-review PR is never merged.
+ARH creates or updates a synthetic review PR containing an `API.md` diff associated
+with the working PR. Architects review that PR for SDK API approval. The review PR
+is closed rather than merged because merging its temporary synthetic branches does
+not change the SDK codebase.
 
 ### Required decisions
 
@@ -318,8 +330,9 @@ review PR is never merged.
   or abandonment?
 - [ ] How are review comments preserved when the diff changes?
 
-The preferred working-branch model avoids repeated disconnected review generations
-and keeps feedback associated with the implementation intended to ship.
+The intended association is one durable ARH review PR for the working SDK PR. As the
+SDK API changes, ARH updates that review rather than creating disconnected review
+artifacts, keeping feedback associated with the implementation intended to ship.
 
 ---
 
@@ -340,6 +353,8 @@ Which states exist, who can cause them, and how are they represented?
 Requirements:
 
 - only one projected state is present at a time;
+- qualifying GitHub review activity is interpreted and stored by ARH against the
+  active API hash;
 - ARH manages labels on both review and working PRs;
 - labels are informational and are never the release source of truth;
 - a new API hash invalidates `api-approved`;
@@ -402,25 +417,21 @@ This replacement effort concerns only the SDK Architecture Board workflow.
 
 ### Proposed boundary
 
-| ARH owns | ARH does not own |
-|----------|------------------|
+| ARH owns or records | ARH does not own |
+|---------------------|------------------|
 | SDK public API review | Stewardship review of data-plane specifications |
 | SDK API review artifact | Breaking-change approval |
 | SDK architect assignment and decision | ARM or spec-level governance |
 | API-hash approval record | General SDK implementation approval |
-| SDK Architecture Board work queue | Release approval unrelated to API review |
+| Package-name approval record relayed from GitHub | The GitHub action where an architect approves a package name |
+| SDK Architecture Board work queue | Release approval unrelated to API or package-name review |
 
 ### Boundary requiring clarification
 
-Package name review is architect work but occurs on spec PRs and is currently a
-separate gate. The design must explicitly choose whether:
-
-- ARH owns package-name approval;
-- the dashboard links to it as a separate work type; or
-- it remains entirely outside ARH and the SDK Architecture Board replacement.
-
-The initial recommendation is to keep the approval mechanism separate while allowing
-the broader architect project to expose a distinct package-name view.
+Package name review remains an action on the GitHub spec PR. The emerging direction
+is for that action to be relayed to and stored in ARH, then exposed under the same
+release gate as SDK API approval. The dashboard may expose package-name work as a
+distinct view while ARH provides one release-facing approval store.
 
 ---
 
@@ -436,8 +447,8 @@ sequenceDiagram
     participant X as Architect
     participant G as Release gate
 
-    S->>W: SDK becomes release-ready
-    S->>A: Canonical review request
+    S->>W: SDK working PR is available
+    S->>A: Review initiation signal (TBD)
     A->>R: Create or update API diff
     A->>D: Add item, identity, owner, and state
     X->>R: Approve or request changes
@@ -453,7 +464,7 @@ review topics:
 1. canonical trigger and fallback;
 2. complete retirement criteria for SDK review issues;
 3. canonical service identity and cross-language grouping;
-4. non-TypeSpec artifact generation;
+4. initiation path for manually authored and locally generated SDKs;
 5. final approval-state and label contract;
 6. release types and enforcement point; and
 7. boundary of package-name work within the architect experience.
@@ -464,12 +475,12 @@ review topics:
 
 ### Phase 1: Resolve contracts
 
-- Inventory current approval-label consumers.
+- Inventory APIView release consumers and informational approval-label consumers.
 - Select the trigger and fallback.
 - Define canonical service identity.
 - Finalize approval states and label names.
 - Define release requirements by release type.
-- Confirm package-name ownership boundary.
+- Define how GitHub package-name approval is relayed to ARH.
 
 ### Phase 2: Dashboard and association proof of concept
 
