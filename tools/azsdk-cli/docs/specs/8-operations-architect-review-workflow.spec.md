@@ -147,10 +147,21 @@ The decision must cover:
 - [ ] What invokes ARH for manually written or locally generated SDK PRs?
 - [ ] Do management plane, data plane, no-spec-change, and team-specific handoff
   flows use the same trigger?
+- [ ] What does ARH do if a review PR is closed before a decision, and what happens
+  when the same review is requested again?
 
-All entry points should use the existing create operation. ARH has no separate
-cancel or restart operation. A person with GitHub permission can close the review
-PR.
+Questions answered by the current implementation:
+
+| Question | Current answer |
+|----------|----------------|
+| Who is authorized to request a review? | Anyone in the CoreAI security group can reach the create endpoint. |
+| Who is authorized to cancel a review? | Cancellation is not an ARH operation. |
+| Who is authorized to restart a review? | Restarting is not an ARH operation. Repeating the create request returns the existing review. |
+| Who can close a review PR? | Anyone with the required GitHub repository permission. Closing is not tied to the architect who approves the API. |
+
+All entry points should use the existing create operation. The remaining question
+is how ARH treats a review PR that GitHub permits someone to close before the review
+is complete.
 
 ---
 
