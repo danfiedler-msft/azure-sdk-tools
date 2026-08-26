@@ -1,4 +1,4 @@
-# Replacing APIView and SDK Review Issues with ARH
+# ARH as the Shared Record for SDK Architecture Approvals
 
 > **Status:** Working draft. This document lists what we already know and the
 > questions we still need to answer.
@@ -7,26 +7,44 @@
 
 ## Goal
 
-Use API Review Hub (ARH) as the main place for SDK architecture review. The new
-process should:
+Use API Review Hub (ARH) as the shared record and dashboard for SDK API and
+package-name approvals.
 
-- keep the official approval in one place;
+The approval actions remain in the GitHub PR where each review happens:
+
+- Architects approve the SDK API on the ARH review PR.
+- Architects approve package names on the `azure-rest-api-specs` PR. The
+  package-name workflow verifies the approver and sends the decision to ARH.
+
+ARH then stores both decisions and makes their status available to GitHub dashboards
+and release pipelines.
+
+The new process should:
+
+- keep the release-facing approval records in one place;
 - give architects one review dashboard;
 - remove duplicate tracking in SDK review issues;
 - work for generated and manually written SDKs;
-- group related language packages under one service; and
-- block release when the SDK API has not been approved.
+- group related language packages under one service;
+- show package names that still need approval and names already approved; and
+- block release when the required SDK API or package-name approval is missing.
 
 The expected flow is:
 
 ```mermaid
 flowchart LR
-    START["Review request (how this starts is not decided)"]
-    START --> ARH["ARH creates or updates a review PR"]
-    ARH --> REVIEW["Architect reviews the API diff"]
-    REVIEW --> RECORD["ARH records the decision for that API hash"]
+    START["SDK API review request (how this starts is not decided)"]
+    START --> REVIEWPR["ARH creates or updates a review PR"]
+    REVIEWPR --> APIREVIEW["Architect approves or requests API changes"]
+    APIREVIEW --> RECORD["ARH stores the API decision"]
+
+    SPECPR["Spec PR changes package names"]
+    SPECPR --> NAMEREVIEW["Architect approves package names on the spec PR"]
+    NAMEREVIEW --> RELAY["Package-name workflow sends the decision to ARH"]
+    RELAY --> RECORD
+
     RECORD --> BOARD["Dashboard shows the review status"]
-    RECORD --> GATE["Release pipeline checks the approval"]
+    RECORD --> GATE["Release pipeline checks both required approvals"]
     GATE --> RELEASE["SDK is released"]
 ```
 
@@ -47,6 +65,9 @@ flowchart LR
 - **Status label:** A label such as `api-approved` that ARH writes to GitHub so
   people and dashboards can see the current state. The label is not the official
   approval record.
+- **Send a package-name decision to ARH:** After an architect approves on the spec
+  PR, the package-name workflow verifies the architect and writes that decision to
+  ARH. The architect does not repeat the approval in ARH.
 
 ---
 
@@ -54,20 +75,20 @@ flowchart LR
 
 | Area | What we know | What is still open |
 |------|--------------|--------------------|
-| Official approval | APIView is official today. ARH will replace it and store approval for an API hash. | Identify anything outside the release pipeline that must move from APIView to ARH. |
+| Approval records | APIView stores SDK API approval today. Package-name approval is enforced on the spec PR. ARH will store both records for release. | Identify anything that must move from APIView or current package-name labels to ARH. |
 | SDK review issues | ARH already groups Packages under a Service. | Decide whether the issue is still needed to request a review or communicate with the service team. |
 | Architect dashboard | [Project view 4](https://github.com/orgs/Azure/projects/1018/views/4) is the current proof of concept. | Decide the fields, filters, and assignment behavior. |
 | Starting a review | No single method has been chosen. | Choose the normal method and a manual backup method. |
 | All SDK types | ARH does not depend on TypeSpec or the release agent. | Explain what starts ARH review for manually written or locally generated SDKs. |
 | Review PR | ARH creates a review PR linked to the working SDK PR. | Decide when it is updated and closed, and when APIView can be removed. |
-| Approval states | GitHub review activity is stored in ARH; ARH writes status labels back to GitHub. | Finalize the labels and which GitHub actions count as an architect decision. |
+| SDK API states | SDK API review happens on the ARH review PR; ARH stores the decision and writes status labels back to GitHub. | Finalize the labels and which GitHub review actions count as an architect decision. |
 | Release check | #16660 defines the pipeline and CLI check. | Decide whether language-specific rules should be aligned and when APIView can stop serving as a backup. |
 | Package-name approval | Architects continue approving names on the GitHub spec PR; ARH stores the result and the release pipeline checks it. | Decide how existing approvals are imported, when an approval can be reused, and what happens when one language's name changes. |
 | Other review boards | ARH covers SDK API and package-name approval records. | Keep Stewardship and Breaking Change review separate. |
 
 ---
 
-## 1. Where the official approval is stored
+## 1. Where decisions happen and where they are stored
 
 ### What happens today
 
@@ -75,25 +96,37 @@ flowchart LR
 - Release pipelines check APIView.
 - Labels such as `<lang>-api-approved` on SDK review issues are only status
   information for the service team. Release pipelines do not use them.
+- Package-name approval happens on the `azure-rest-api-specs` PR. Protected labels
+  and a required GitHub check block the spec PR until the required architects
+  approve.
 
 ### Proposed change
 
-ARH becomes the official record. It stores:
+ARH becomes the shared record used by release pipelines.
 
-- the API hash;
-- the architect's decision;
-- the architect who made the decision;
-- the language and package;
-- the working SDK PR; and
-- when the decision was made.
+For SDK API approval:
 
-ARH then writes labels and dashboard fields back to GitHub so people can see the
-status.
+- The architect reviews and decides on the ARH review PR.
+- ARH stores the API hash, decision, architect, language, package, working SDK PR,
+  and decision time.
+
+For package-name approval:
+
+- The architect reviews and approves on the `azure-rest-api-specs` PR.
+- The package-name workflow verifies the architect.
+- The workflow sends the Service, language, exact package name, architect, decision,
+  and decision time to ARH.
+
+ARH makes both results available to the dashboard and release check. GitHub
+workflows can use the stored results to update labels, comments, and required checks.
+ARH does not ask the architect to approve the package name a second time.
 
 ### Questions to answer
 
-- [ ] Besides the release pipeline, does any tool still read approval from APIView
-  or from the informational GitHub labels?
+- [ ] Besides the release pipeline, does any tool still read SDK API approval from
+  APIView or informational GitHub labels?
+- [ ] Which tools currently read package-name approval labels and must instead read
+  the result stored in ARH?
 - [ ] When an approved SDK API changes, should ARH automatically remove the old
   approval and request another review?
 - [ ] If ARH cannot be reached during release, should release stop? What approved
@@ -116,8 +149,8 @@ status.
 | Supports Bookings and scheduled reviews | The new review request method |
 | Keeps discussion history | ARH review PR |
 
-The issue has never been the official approval record. APIView is official today;
-ARH will be official after the release pipeline moves to it.
+The issue has never been the official SDK API approval record. APIView is official
+today; ARH will become the release-facing record after the pipeline moves to it.
 
 ### Service information that must remain visible
 
@@ -162,10 +195,12 @@ architects' main review list.
 It should answer:
 
 - What needs my review?
+- Is this an SDK API review or a package-name review?
 - What language, package, and service is it for?
 - Is it waiting for review, waiting for service-team changes, or approved?
 - Where are the review PR and working SDK PR?
 - What other packages belong to the same ARH Service?
+- Which package names still need approval, and which names were approved earlier?
 
 ARH already groups child Packages under a top-level Service. The dashboard should
 use that relationship rather than guess the service from PR titles or labels.
@@ -183,17 +218,20 @@ work item does not need to appear on the dashboard.
 - [ ] Does ARH update the dashboard fields directly, or does the dashboard read
   ARH's GitHub labels?
 - [ ] How are existing open reviews added to the dashboard?
+- [ ] How are package-name reviews on spec PRs linked to the correct ARH Service and
+  shown on the dashboard?
 - [ ] Should the project contain only SDK Architecture Board work, or should it link
   to separate Stewardship and Breaking Change views?
 
-The GitHub Project status `Done` must not mean API approval. ARH approval for the API
-hash remains the official decision.
+The GitHub Project status `Done` must not mean API or package-name approval. The
+decisions stored in ARH remain the records used for release.
 
 ---
 
-## 4. What starts an ARH review?
+## 4. What starts an SDK API review?
 
-No normal method has been selected.
+No normal method for starting an SDK API review has been selected. Package-name
+review has a separate trigger: a new or changed package name on the spec PR.
 
 | Option | Benefit | Drawback |
 |--------|---------|----------|
@@ -218,8 +256,8 @@ same review instead of creating duplicates.
 
 ## 5. Manually written and locally generated SDKs
 
-ARH already works without TypeSpec or the release agent. It needs a working SDK PR,
-language, package, ARH Service, and API information.
+ARH already supports SDK API review without TypeSpec or the release agent. It needs
+a working SDK PR, language, package, ARH Service, and API information.
 
 The open question is not whether ARH supports these SDKs. The question is what asks
 ARH to create the review.
@@ -270,11 +308,11 @@ changes, ARH updates that review rather than creating unrelated review PRs.
 
 ---
 
-## 7. Approval states and GitHub labels
+## 7. SDK API states and GitHub labels
 
-The approval action happens in GitHub. ARH checks whether the reviewer is an
-authorized architect, stores the decision for the current API hash, and writes the
-status back to GitHub.
+The SDK API approval action happens on the ARH review PR in GitHub. ARH checks
+whether the reviewer is an authorized architect, stores the decision for the current
+API hash, and writes the status back to GitHub.
 
 | ARH decision | Proposed GitHub label | Meaning |
 |--------------|-----------------------|---------|
@@ -319,7 +357,8 @@ check:
    released.
 
 This release check does not decide what starts the ARH review. It only verifies the
-approval before release.
+approval before release. In the target design, ARH returns the package's combined
+release status, including required SDK API and package-name approvals.
 
 ### Questions to answer
 
@@ -329,7 +368,7 @@ approval before release.
 
 ---
 
-## 9. Package-name approval in ARH
+## 9. Recording package-name approval in ARH
 
 ### What happens today
 
@@ -356,6 +395,10 @@ GitHub remains where architects review and approve package names. The workflow a
 sends each decision to ARH so ARH can keep the long-term record and expose it to the
 release pipeline.
 
+When a spec PR opens or changes, the package-name workflow asks ARH whether each
+exact package name was approved earlier. The GitHub comment then shows whether the
+architect must act:
+
 The package-name table could show:
 
 | State | Display | Architect action |
@@ -370,7 +413,8 @@ After approval:
 2. The workflow verifies that the architect may approve that language.
 3. The workflow records the Service, language, exact package name, architect, and
    decision in ARH.
-4. The GitHub status check uses the ARH-backed result to unblock the spec PR.
+4. ARH returns the stored status to the workflow so the GitHub comment and required
+   check reflect the result.
 5. The release pipeline checks both package-name approval and SDK API approval
    through ARH.
 
@@ -390,8 +434,8 @@ After approval:
   configured?
 - [ ] When an exact package name changes, does ARH keep the old approval as history
   while marking only the new name as pending?
-- [ ] After ARH is the official record, are the current protected approval labels
-  still needed, or can the GitHub check read ARH directly?
+- [ ] Are protected labels still how the architect approves on the spec PR? If not,
+  what GitHub action replaces them before the verified decision is sent to ARH?
 - [ ] How does the package-name workflow find or create the correct ARH Service and
   Package?
 
@@ -405,7 +449,9 @@ Laurent's process describes three separate review groups:
 2. Stewardship Board
 3. SDK Architecture Board
 
-This work replaces only the SDK Architecture Board's API review process.
+This work replaces the SDK Architecture Board's APIView and SDK review issue flow.
+It also stores package-name decisions in ARH, but it does not move the package-name
+approval action away from the GitHub spec PR.
 
 | ARH covers | Separate process |
 |------------|------------------|
