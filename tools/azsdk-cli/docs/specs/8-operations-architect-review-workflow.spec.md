@@ -111,6 +111,31 @@ For package-name approval:
 SDK API approval applies only to its API hash. A changed SDK API has a new hash and
 requires approval.
 
+Questions answered by the current design:
+
+- **Question:** What is the authoritative SDK API approval record today?
+
+  **Answer:** APIView. SDK review issue labels are informational, and release does
+  not consult GitHub or Azure DevOps for SDK API approval.
+
+- **Question:** How do release pipelines transition from APIView to ARH?
+
+  **Answer:** The new release components use `azsdk` commands that query APIView or
+  ARH. This provides compatibility while languages onboard to ARH.
+
+- **Question:** How does ARH prevent approval from applying after the API changes?
+
+  **Answer:** The language repository submits the exact API hash. A changed surface
+  produces a different hash, so the approval check fails. ARH can show approved
+  hashes to a person, but CI still fails for the unapproved hash.
+
+- **Question:** Does APIView also gate directly on the submitted API hash?
+
+  **Answer:** Not directly. The APIView release check finds a matching package and
+  version. APIView uses the hash internally to copy approval from an older version
+  when the API is unchanged. ARH instead requires the release check to submit the
+  exact hash.
+
 ---
 
 <a id="decision-1"></a>
@@ -152,12 +177,50 @@ The decision must cover:
 
 Questions answered by the current implementation:
 
-| Question | Current answer |
-|----------|----------------|
-| Who is authorized to request a review? | Anyone in the CoreAI security group can reach the create endpoint. |
-| Who is authorized to cancel a review? | Cancellation is not an ARH operation. |
-| Who is authorized to restart a review? | Restarting is not an ARH operation. Repeating the create request returns the existing review. |
-| Who can close a review PR? | Anyone with the required GitHub repository permission. Closing is not tied to the architect who approves the API. |
+- **Question:** Who is authorized to request a review?
+
+  **Answer:** Anyone in the CoreAI security group can reach the create endpoint.
+
+- **Question:** Who is authorized to cancel or restart a review?
+
+  **Answer:** Cancel and restart are not ARH operations.
+
+- **Question:** Who can close a review PR?
+
+  **Answer:** Anyone with the required GitHub repository permission.
+
+- **Question:** Does a new commit update the existing review or create another one?
+
+  **Answer:** A target-branch commit updates the existing review when it changes the
+  API diff. It never creates another review.
+
+- **Question:** What happens when the same package, base, and target are requested
+  again?
+
+  **Answer:** The create endpoint returns the existing review PR instead of creating
+  a duplicate.
+
+- **Question:** Is ARH limited to TypeSpec or release-agent SDKs?
+
+  **Answer:** No. ARH is independent of TypeSpec and the release agent. Generated,
+  manually written, and locally generated paths can use the same create endpoint.
+
+- **Question:** What information does a caller have to provide?
+
+  **Answer:** Language, package name, and target branch are required. The caller can
+  also provide a base tag or ref and target owner. ARH can infer the repository from
+  the language.
+
+- **Question:** Who produces the API artifact and hash for generated and
+  non-generated SDKs?
+
+  **Answer:** The language repository controls artifact generation and defines the
+  API hash for its language. ARH is not dependent on how the SDK was produced.
+
+- **Question:** Who owns failures that prevent creation of a reviewable artifact?
+
+  **Answer:** The ARH team owns failures in ARH or shared language-independent
+  templates. The language team owns failures in language-specific components.
 
 All entry points should use the existing create operation. The remaining question
 is how ARH treats a review PR that GitHub permits someone to close before the review
@@ -227,6 +290,24 @@ The decision must cover:
   them?
 - [ ] How does the package-name process find the correct ARH Service and Package?
 
+Questions answered by the proposed integration:
+
+- **Question:** Where does package-name approval happen, and where is it stored?
+
+  **Answer:** The architect acts in GitHub on the spec PR. ARH records the verified
+  decision.
+
+- **Question:** How does the release pipeline read package-name approval?
+
+  **Answer:** It queries ARH through `azsdk package get-approval-status`, alongside
+  SDK API approval.
+
+- **Question:** Does a separate package-name dashboard prevent ARH from storing the
+  approval?
+
+  **Answer:** No. A separate Project view can present the work while ARH remains the
+  release-facing record.
+
 ---
 
 <a id="decision-3"></a>
@@ -268,6 +349,19 @@ The decision must cover:
 - [ ] Should old issues remain as read-only history?
 - [ ] How long do both processes run before new issues stop?
 
+Questions answered by the current models:
+
+- **Question:** Did the SDK review issue provide an authoritative approval?
+
+  **Answer:** No. The issue never had approval capability; its labels were
+  informational.
+
+- **Question:** Can ARH preserve the service-level grouping currently shown by one
+  multi-language issue?
+
+  **Answer:** Yes. ARH has a top-level Service with child Packages, so related
+  language packages can be grouped under one service.
+
 If the issue remains required for intake or communication, teams still have two
 places to track one review.
 
@@ -308,6 +402,48 @@ The decision must cover:
 - [ ] What package-name status is shown: pending, approved earlier, or not
   configured?
 
+Questions answered by the current dashboard design:
+
+- **Question:** Where are production ARH review PRs hosted?
+
+  **Answer:** In the language repositories.
+
+- **Question:** How can architects filter by language?
+
+  **Answer:** The repository can serve as the language because each language has its
+  own repository.
+
+- **Question:** Do architects need Azure DevOps release-plan work items?
+
+  **Answer:** No. Release plans are for service teams and should not be required for
+  architect review.
+
+- **Question:** Can the Service name be used to group or filter review PRs?
+
+  **Answer:** Yes. Each Package has a Service parent, and the unique Service name can
+  appear in review PR titles for Project text filtering. If titles are used, manual
+  edits need anti-tampering handling.
+
+- **Question:** How can multiple reviews for the same Service be distinguished
+  without relying on release plans?
+
+  **Answer:** The suggested correlation is
+  `service_id + package_version_api_version`. Architects should not need
+  release-plan data.
+
+- **Question:** Are labels or Project fields used for review-state filtering?
+
+  **Answer:** Review PR labels are the current routing and filtering mechanism.
+
+- **Question:** Does the Project `Done` status mean API approval?
+
+  **Answer:** No. Approval is shown by `api-approved`; the `Done` field should be
+  removed if it has no other meaning.
+
+- **Question:** How are existing review PRs added to the Project?
+
+  **Answer:** The current proof of concept requires them to be added manually.
+
 ---
 
 <a id="decision-5"></a>
@@ -332,6 +468,18 @@ The decision must cover:
 - [ ] Where is the authorized architect list stored?
 - [ ] How are backup reviewers handled?
 
+Questions answered by the current implementation:
+
+- **Question:** Where does `changes requested` come from?
+
+  **Answer:** Native GitHub review activity triggers an ARH webhook. ARH responds to
+  that state and manages the labels.
+
+- **Question:** Are labels needed on both the review PR and working PR?
+
+  **Answer:** Yes. Review PR labels support architect dashboard filtering. Working
+  PR labels communicate the state to the service team.
+
 ---
 
 ## Established ARH review PR behavior
@@ -346,6 +494,32 @@ ARH keeps one review PR for the same package, base, and target:
 - A person with GitHub permission can close the review PR.
 - Merging the temporary review branches has no effect on SDK code, so the review PR
   should be closed instead.
+
+Questions answered by the current implementation:
+
+- **Question:** Can the review PR be merged?
+
+  **Answer:** Technically yes, but it only merges the review branch into a synthetic
+  base branch. It does not change SDK code, and both temporary branches are
+  eventually deleted.
+
+- **Question:** Does each target branch keep one review PR as feedback is addressed?
+
+  **Answer:** Yes. Changes pushed to the target branch update the existing review PR
+  when they change the API diff.
+
+- **Question:** What identifies the baseline for the API diff?
+
+  **Answer:** The caller supplies the base tag or ref. A skill or agent may infer it
+  on the caller's behalf.
+
+- **Question:** How are review comments preserved when the API diff changes?
+
+  **Answer:** GitHub preserves them on the existing review PR.
+
+- **Question:** Does APIView remain after ARH migration?
+
+  **Answer:** No. APIView is deleted after every language is onboarded to ARH.
 
 ---
 
@@ -366,6 +540,38 @@ APIView is removed after all languages are onboarded to ARH. If ARH is unavailab
 afterward, release uses the authorized break-glass override.
 
 The target ARH result combines required SDK API and package-name approval.
+
+Questions answered by the release design:
+
+- **Question:** Which system enforces SDK API approval for release?
+
+  **Answer:** The language release pipeline calls the shared
+  `azsdk package get-approval-status` command defined by #16660.
+
+- **Question:** What system computes the API hash?
+
+  **Answer:** Each language repository owns API artifact generation and defines the
+  hash for that language.
+
+- **Question:** Does the release pipeline read both APIView and ARH during
+  migration?
+
+  **Answer:** Yes.
+
+- **Question:** What ends the APIView and ARH migration period?
+
+  **Answer:** All languages are onboarded to ARH, then APIView is retired.
+
+- **Question:** What happens when ARH is unavailable after APIView is retired?
+
+  **Answer:** An authorized break-glass override can unblock the release.
+
+Questions not answered by the reviewed comments:
+
+- [ ] Is approval required before the working PR merges, before release execution,
+  or both?
+- [ ] Which release types require architecture review: first preview, preview
+  update, first GA, GA update, and patch?
 
 ---
 
