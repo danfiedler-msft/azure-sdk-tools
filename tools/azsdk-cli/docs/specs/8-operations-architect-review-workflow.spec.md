@@ -16,7 +16,8 @@ The approval actions remain in the GitHub PR where each review happens:
 - Architects approve package names on the `azure-rest-api-specs` PR.
 
 ARH stores both decisions and makes their status available to architect dashboards
-and release pipelines. How package-name decisions reach ARH is still open.
+and release pipelines. Package mapping, approval reuse, and dashboard display are
+still open.
 
 The new process should:
 
@@ -37,7 +38,7 @@ flowchart LR
 
     SPECPR["Spec PR changes package names"]
     SPECPR --> NAMEREVIEW["Architect approves names on the spec PR"]
-    NAMEREVIEW --> NAMERECORD["ARH stores the package-name decision (integration TBD)"]
+    NAMEREVIEW --> NAMERECORD["Approved label webhook records the decision in ARH"]
 
     APIRECORD --> BOARD["Project view 4 lists and filters ARH review PRs"]
     NAMERECORD --> NAMEVIEW["Package-name dashboard or view (TBD)"]
@@ -74,7 +75,7 @@ flowchart LR
 | # | Priority | Decision | What is already known |
 |---|----------|----------|-----------------------|
 | [1](#decision-1) | P0 | Choose how SDK API review starts for every SDK path. | All paths can call the existing ARH create operation. |
-| [2](#decision-2) | P0 | Decide how package-name approval is recorded in ARH and when old approval can be reused. | Approval remains on the GitHub spec PR; ARH stores the result for release. |
+| [2](#decision-2) | P0 | Decide how package-name approval maps to an ARH Package and when old approval can be reused. | An approved label on the spec PR sends a webhook to ARH; ARH stores the result for release. |
 | [3](#decision-3) | P0 | Decide whether SDK review issues can be removed and how meeting requests work afterward. | ARH already groups Packages under a Service and stores API decisions. |
 | [4](#decision-4) | P1 | Finish the architect dashboard design, including package-name work. | [Project view 4](https://github.com/orgs/Azure/projects/1018/views/4) is the ARH review PR queue. |
 | [5](#decision-5) | P1 | Finalize SDK API status labels and architect authorization. | GitHub review activity triggers ARH; ARH stores the decision and updates labels. |
@@ -230,7 +231,7 @@ is complete.
 
 <a id="decision-2"></a>
 
-## Decision 2 (P0): How is package-name approval recorded in ARH?
+## Decision 2 (P0): How is package-name approval mapped and reused?
 
 ### Current GitHub process
 
@@ -253,17 +254,10 @@ This process blocks the spec PR and remains separate from later SDK API review.
 
 The architect continues to approve on the GitHub spec PR. ARH stores the verified
 result, and `azsdk package get-approval-status` returns it to the release pipeline.
-The mechanism that records the GitHub decision in ARH is not designed.
-
-Possible recording signals are:
-
-- each verified `package-name-<lang>-approved` label;
-- the aggregate `package-name-approved` state;
-- the final approval-label state when the spec PR merges; or
-- GitHub events received directly by the ARH GitHub App.
-
-Waiting for merge would let ARH record the result for release, but the current
-GitHub check would remain responsible for blocking the spec PR.
+When an approved label is added to the spec PR, a GitHub webhook sends the event to
+ARH. ARH records package-name approval as data on the corresponding Package. The
+existing GitHub check continues to gate the spec PR; the later SDK release gate
+gets the recorded status from ARH.
 
 If old approval is reused, the GitHub table could show:
 
@@ -273,36 +267,51 @@ If old approval is reused, the GitHub table could show:
 | Exact name approved earlier | Approved, greyed out | No action unless the full cross-language set must be confirmed again |
 | Language not configured | Not configured, greyed out | Decision needed |
 
-The decision must cover:
+The decision questions and answers are:
 
-- [ ] Which event records approval in ARH?
-- [ ] Does ARH participate in the spec PR merge check, or only store the result for
+- [x] Where does package-name approval happen, and where is it stored?
+
+  **Answer:** The architect approves by adding the approved label on the
+  `azure-rest-api-specs` PR. The durable approval record lives in ARH on the
+  corresponding Package.
+
+- [x] Which event records approval in ARH?
+
+  **Answer:** Adding the approved label to the spec PR sends a GitHub webhook to
+  ARH, which records the package-name approval.
+
+- [x] Does ARH participate in the spec PR merge check, or only store the result for
   release?
+
+  **Answer:** The existing REST API specs workflow continues to gate the spec PR.
+  ARH stores the result that the later SDK release gate queries.
+
 - [ ] What fields identify reusable approval: Service, language, and exact package
   name, or more?
+
+  **Known:** Package-name approval belongs to the ARH Package rather than a package
+  Version. The exact lookup key and reuse rules are still open.
+
 - [ ] How are approvals created before ARH imported?
 - [ ] When one language's name changes, must all Tier 1 languages approve again?
 - [ ] If they must, how does a greyed-out old approval show that confirmation is
   still needed?
 - [ ] What does an architect approve for a Tier 1 language not yet configured?
 - [ ] Does ARH keep an old name's approval as history after the name changes?
-- [ ] Are protected labels still the GitHub approval action? If not, what replaces
+- [x] Are protected labels still the GitHub approval action? If not, what replaces
   them?
+
+  **Answer:** Yes. The approved label on the spec PR remains the GitHub approval
+  action and triggers the webhook to ARH.
+
 - [ ] How does the package-name process find the correct ARH Service and Package?
 
-Questions answered by the proposed integration:
-
-- **Question:** Where does package-name approval happen, and where is it stored?
-
-  **Answer:** The architect acts in GitHub on the spec PR. ARH records the verified
-  decision.
-
-- **Question:** How does the release pipeline read package-name approval?
+- [x] How does the release pipeline read package-name approval?
 
   **Answer:** It queries ARH through `azsdk package get-approval-status`, alongside
   SDK API approval.
 
-- **Question:** Does a separate package-name dashboard prevent ARH from storing the
+- [x] Does a separate package-name dashboard prevent ARH from storing the
   approval?
 
   **Answer:** No. A separate Project view can present the work while ARH remains the
