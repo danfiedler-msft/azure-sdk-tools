@@ -16,8 +16,8 @@ The approval actions remain in the GitHub PR where each review happens:
 - Architects approve package names on the `azure-rest-api-specs` PR.
 
 ARH stores both decisions and makes their status available to architect dashboards
-and release pipelines. Package mapping, approval reuse, and dashboard display are
-still open.
+and release pipelines. Spec-less package handling, approval reuse, and dashboard
+display are still open.
 
 The new process should:
 
@@ -31,14 +31,15 @@ The new process should:
 
 ```mermaid
 flowchart LR
-    START["SDK API review request (trigger TBD)"]
+    START["Release-ready label, release backstop, or manual request"]
     START --> REVIEWPR["ARH creates or updates a review PR"]
     REVIEWPR --> APIREVIEW["Architect decides on the API"]
     APIREVIEW --> APIRECORD["ARH stores the API decision"]
 
     SPECPR["Spec PR changes package names"]
     SPECPR --> NAMEREVIEW["Architect approves names on the spec PR"]
-    NAMEREVIEW --> NAMERECORD["Approved label webhook records the decision in ARH"]
+    NAMEREVIEW --> SPECMERGE["Spec PR merges with final approval labels"]
+    SPECMERGE --> NAMERECORD["Merge webhook records per-language decisions in ARH"]
 
     APIRECORD --> BOARD["Project view 4 lists and filters ARH review PRs"]
     NAMERECORD --> NAMEVIEW["Package-name dashboard or view (TBD)"]
@@ -74,11 +75,12 @@ flowchart LR
 
 | # | Priority | Decision | What is already known |
 |---|----------|----------|-----------------------|
-| [1](#decision-1) | P0 | Choose how SDK API review starts for every SDK path. | All paths can call the existing ARH create operation. |
-| [2](#decision-2) | P0 | Decide how package-name approval maps to an ARH Package and when old approval can be reused. | An approved label on the spec PR sends a webhook to ARH; ARH stores the result for release. |
+| [1](#decision-1) | P0 | Finalize the release-ready trigger and which release types it supports. | Preferred flow: working PR label, release-pipeline backstop, and agent or CLI for custom requests. |
+| [2](#decision-2) | P0 | Decide package-name handling for spec-less SDKs and finalize approval reuse. | A spec PR merge webhook records final per-language labels on ARH Packages. |
 | [3](#decision-3) | P0 | Decide whether SDK review issues can be removed and how meeting requests work afterward. | ARH already groups Packages under a Service and stores API decisions. |
 | [4](#decision-4) | P1 | Finish the architect dashboard design, including package-name work. | [Project view 4](https://github.com/orgs/Azure/projects/1018/views/4) is the ARH review PR queue. |
 | [5](#decision-5) | P1 | Finalize SDK API status labels and architect authorization. | GitHub review activity triggers ARH; ARH stores the decision and updates labels. |
+| [6](#decision-6) | P1 | Finalize when review PRs close and whether long-running reviews are supported. | Reviews are on demand by default; long-running reviews should be exceptional. |
 
 ---
 
@@ -105,12 +107,14 @@ For package-name approval:
 
 - The architect decides on the `azure-rest-api-specs` PR.
 - The existing workflow verifies the architect.
-- ARH stores the Service, language, exact package name, architect, decision, and
-  decision time.
+- After merge, ARH stores each language's decision on the corresponding Package and
+  links to the spec PR as evidence.
 - The architect does not approve the package name again in ARH.
 
 SDK API approval applies only to its API hash. A changed SDK API has a new hash and
-requires approval.
+requires approval. When the hash is unchanged, approval carry-forward follows the
+policy configured for that language repository during ARH registration. Languages
+can choose different policies.
 
 Questions answered by the current design:
 
@@ -137,13 +141,36 @@ Questions answered by the current design:
   when the API is unchanged. ARH instead requires the release check to submit the
   exact hash.
 
+- **Question:** Can an unchanged API hash reuse approval for another package
+  version?
+
+  **Answer:** Yes, when allowed by that language repository's ARH policy. A changed
+  hash is never approved through carry-forward.
+
 ---
 
 <a id="decision-1"></a>
 
 ## Decision 1 (P0): How does SDK API review start?
 
-No normal trigger has been selected.
+The preferred normal trigger is a release-ready label on the working SDK PR. This
+works for TypeSpec-generated, otherwise generated, and manually written SDKs.
+
+The label path is a shortcut. It cannot provide every argument accepted by
+`azsdk api-review create`, so it uses a standard comparison:
+
+- For a normal GA release, compare against the latest GA.
+- For a first GA, compare against no previous GA.
+- Post a working PR comment that identifies the selected baseline.
+- Direct the user to the Azure SDK agent or `azsdk` command when another baseline is
+  needed.
+
+If a team merges without requesting review, the release pipeline is the backstop.
+When its approval check finds no approval and no open review, it creates a review.
+After approval, rerunning the approval job continues the release.
+
+The agent or CLI remains the explicit path for beta reviews, unusual baselines, and
+other custom requests.
 
 Today, authorized CoreAI users can call `azsdk api-review create`. The command
 requires:
@@ -158,23 +185,25 @@ requires:
 Calling ARH again for the same package, base, and target returns the existing review
 instead of creating a duplicate.
 
-| Option | Benefit | Drawback |
-|--------|---------|----------|
-| Label on the working SDK PR | Simple and works for any SDK PR | Someone must remember to add it |
-| Guidance in the release planner | Includes service and release information | The dashboard is read-only; the service team must copy and run an Azure SDK agent request |
-| `azsdk` or Azure SDK agent request | Explicit and works outside the release planner | Service teams must know what to run |
-| Automatic release-readiness event | Requires the least service-team work | The event and covered SDK paths are not defined |
+| Entry point | Purpose | Status |
+|-------------|---------|--------|
+| Release-ready label on the working SDK PR | Normal pre-merge request | Preferred direction |
+| Release pipeline approval check | Backstop after merge when no review exists | Preferred direction |
+| `azsdk` or Azure SDK agent request | Custom baseline, beta, or exceptional flow | Existing explicit path |
+| Release planner guidance | Tell the service team what agent request to run | Read-only guidance, not an action |
+| Automated release flow | Possible future trigger | Interaction with the label flow is not defined |
 
 The decision must cover:
 
-- [ ] Which option is the normal trigger?
-- [ ] If it is automatic, which event starts it?
-- [ ] What is the manual backup?
-- [ ] What invokes ARH for manually written or locally generated SDK PRs?
-- [ ] Do management plane, data plane, no-spec-change, and team-specific handoff
-  flows use the same trigger?
-- [ ] What does ARH do if a review PR is closed before a decision, and what happens
-  when the same review is requested again?
+- [ ] What is the final label name: `release-ready`, `ga-release-ready`, or another
+  name?
+- [ ] Does the label support GA only, first beta and GA, or every requested beta
+  and GA?
+- [ ] For a beta label, does ARH compare against the latest beta, latest GA, or
+  reject the shortcut and direct the user to the agent or CLI?
+- [ ] Do management plane auto-release and other automated release flows apply the
+  label, call ARH directly, or rely on the release-pipeline backstop?
+- [ ] Do no-spec-change and team-specific handoff flows need different behavior?
 
 Questions answered by the current implementation:
 
@@ -223,9 +252,25 @@ Questions answered by the current implementation:
   **Answer:** The ARH team owns failures in ARH or shared language-independent
   templates. The language team owns failures in language-specific components.
 
-All entry points should use the existing create operation. The remaining question
-is how ARH treats a review PR that GitHub permits someone to close before the review
-is complete.
+- **Question:** What is the manual backup when the label's baseline is not correct?
+
+  **Answer:** Use the Azure SDK agent or `azsdk api-review create` and supply the
+  desired base explicitly.
+
+- **Question:** What happens if the team reaches the release pipeline without
+  requesting a review?
+
+  **Answer:** The approval check can create the missing review. The team gets the
+  approval and reruns that job to continue.
+
+- **Question:** Are “review requested” and “release ready” different for the normal
+  flow?
+
+  **Answer:** No. The preferred label represents readiness for the review required
+  to release.
+
+All entry points should use the existing create operation. Review PR closing and
+reopening behavior is covered in [Decision 6](#decision-6).
 
 ---
 
@@ -254,10 +299,25 @@ This process blocks the spec PR and remains separate from later SDK API review.
 
 The architect continues to approve on the GitHub spec PR. ARH stores the verified
 result, and `azsdk package get-approval-status` returns it to the release pipeline.
-When an approved label is added to the spec PR, a GitHub webhook sends the event to
-ARH. ARH records package-name approval as data on the corresponding Package. The
-existing GitHub check continues to gate the spec PR; the later SDK release gate
-gets the recorded status from ARH.
+The existing GitHub check continues to gate the spec PR.
+
+ARH waits for the spec PR merge webhook rather than recording every label event.
+After merge, it reads the final per-language approval labels and records each
+language's package-name approval on the corresponding ARH Package. Waiting for
+merge avoids repeated writes when labels are added, removed, and added again.
+
+The record should include:
+
+- approved status for the language Package;
+- a link to the merged spec PR as evidence; and
+- enough Package identity to return the approval during release.
+
+Package-name approval is stored on the Package, not a Version. An ARH Package has a
+package name, language, and optional parent Service. Package versions are separate.
+
+Existing package-name approvals should be backfilled from APIView. Because those
+approvals may predate the GitHub process, their evidence can state that they were
+copied from APIView instead of linking to a spec PR.
 
 If old approval is reused, the GitHub table could show:
 
@@ -277,8 +337,8 @@ The decision questions and answers are:
 
 - [x] Which event records approval in ARH?
 
-  **Answer:** Adding the approved label to the spec PR sends a GitHub webhook to
-  ARH, which records the package-name approval.
+  **Answer:** The spec PR merge webhook. ARH then reads the final per-language
+  approval labels and records them.
 
 - [x] Does ARH participate in the spec PR merge check, or only store the result for
   release?
@@ -289,10 +349,15 @@ The decision questions and answers are:
 - [ ] What fields identify reusable approval: Service, language, and exact package
   name, or more?
 
-  **Known:** Package-name approval belongs to the ARH Package rather than a package
-  Version. The exact lookup key and reuse rules are still open.
+  **Known:** Package-name approval belongs to an ARH Package identified by package
+  name and language, with an optional parent Service. It is not tied to a Version.
+  The exact reuse rules are still open.
 
-- [ ] How are approvals created before ARH imported?
+- [x] How are existing approvals imported into ARH?
+
+  **Answer:** Run a migration script that reads package-name approval from APIView.
+  The imported record notes APIView as its evidence.
+
 - [ ] When one language's name changes, must all Tier 1 languages approve again?
 - [ ] If they must, how does a greyed-out old approval show that confirmation is
   still needed?
@@ -301,10 +366,13 @@ The decision questions and answers are:
 - [x] Are protected labels still the GitHub approval action? If not, what replaces
   them?
 
-  **Answer:** Yes. The approved label on the spec PR remains the GitHub approval
-  action and triggers the webhook to ARH.
+  **Answer:** Yes. The protected per-language labels remain the GitHub approval
+  action. ARH reads their final state when the spec PR merges.
 
 - [ ] How does the package-name process find the correct ARH Service and Package?
+
+  **Known:** ARH Packages are identified by package name and language and can have
+  an optional Service ID. The exact mapping from the spec PR is still open.
 
 - [x] How does the release pipeline read package-name approval?
 
@@ -316,6 +384,41 @@ The decision questions and answers are:
 
   **Answer:** No. A separate Project view can present the work while ARH remains the
   release-facing record.
+
+- [x] What evidence is stored with a new package-name approval?
+
+  **Answer:** A link to the merged spec PR.
+
+- [x] How should a package with no known approval be treated?
+
+  **Answer:** Treat it like a new package that still needs package-name approval.
+
+- [x] What happens when an SDK review is requested for a Package not yet in ARH?
+
+  **Answer:** ARH creates the Package and then creates its review PR.
+
+### Spec-less SDK packages
+
+When a review is requested for a package that is not yet in ARH, ARH creates the
+Package and then creates the review PR. This does not answer where its package name
+should be approved when no REST API spec exists.
+
+Two options remain:
+
+| Option | Benefit | Concern |
+|--------|---------|---------|
+| Approve the package name with the API on the ARH review PR | No artificial spec-repository entry; the review PR is the evidence | Creates a second package-name approval path and has no cross-language view |
+| Register the package under `azure-rest-api-specs` even without a spec | Keeps one approval location and supports cross-language discussion | Requires an artificial repository entry for a language-specific utility package |
+
+If the review PR is used, GitHub approval would approve both the API and package
+name only after ARH verifies that the package truly has no associated spec.
+
+Open questions:
+
+- [ ] Do spec-less packages require cross-language package-name consensus?
+- [ ] How does ARH reliably determine that a package has no associated spec?
+- [ ] Which of the two approval locations should architects use for spec-less
+  packages?
 
 ---
 
@@ -374,6 +477,10 @@ Questions answered by the current models:
 If the issue remains required for intake or communication, teams still have two
 places to track one review.
 
+Deferred architecture concerns do not require the review PR to stay open. A normal
+tracking issue can carry work postponed to a later minor or major release. This is
+separate from retaining the current SDK review issue as the review workflow.
+
 ---
 
 <a id="decision-4"></a>
@@ -395,6 +502,10 @@ The proposed labels show review state:
 Review PR labels support Project filtering. Working PR labels show the same state to
 the service team but are not approval records. The Project `Status` field, such as
 `Done`, is not approval and should be hidden if it adds no separate value.
+
+ARH can also show package-name approval on both the review PR and working PR. That
+status is informational and should link to the evidence spec PR when one exists.
+Architects still perform the package-name approval on the spec PR.
 
 ARH already groups Packages under a Service. A proposed display is to put the
 Service name in each review PR title for text filtering. If titles are used, ARH
@@ -453,6 +564,11 @@ Questions answered by the current dashboard design:
 
   **Answer:** The current proof of concept requires them to be added manually.
 
+- **Question:** Can package-name approval be shown on the review and working PRs?
+
+  **Answer:** Yes. ARH can apply informational status labels to both and link to the
+  evidence used for the recorded decision.
+
 ---
 
 <a id="decision-5"></a>
@@ -468,6 +584,10 @@ removed.
 
 A normal SDK implementation approval is not an API approval. ARH counts only
 decisions from an authorized architect on the ARH review PR.
+
+API and package-name status labels on ARH and working PRs are controlled by ARH.
+If someone applies one manually, ARH should remove it and comment with a link to the
+correct approval process.
 
 The decision must cover:
 
@@ -489,9 +609,17 @@ Questions answered by the current implementation:
   **Answer:** Yes. Review PR labels support architect dashboard filtering. Working
   PR labels communicate the state to the service team.
 
+- **Question:** Is a separate `approved-with-comments` state needed?
+
+  **Answer:** No. A GitHub approval may include comments, but approval means the API
+  is approved. Work intentionally postponed to a future release belongs in a
+  tracking issue.
+
 ---
 
-## Established ARH review PR behavior
+<a id="decision-6"></a>
+
+## Decision 6 (P1): When do review PRs close?
 
 ARH keeps one review PR for the same package, base, and target:
 
@@ -503,6 +631,28 @@ ARH keeps one review PR for the same package, base, and target:
 - A person with GitHub permission can close the review PR.
 - Merging the temporary review branches has no effect on SDK code, so the review PR
   should be closed instead.
+
+Reviews should remain on demand by default. Keeping a permanent review open for
+every Package would create too many PRs and cause broad repository changes to
+refresh many reviews at once.
+
+ARH supports multiple reviews with the same target and different baselines. A
+target update refreshes each review whose API diff changes. ARH should not close the
+other reviews automatically because an architect may intentionally compare the same
+target against the latest GA and latest beta.
+
+Putting several baseline comparisons into one review PR was also explored but is
+not the preferred design. It makes the version being reviewed less obvious and
+requires substantial changes to the review artifact.
+
+The preferred lifecycle is:
+
+- A review targeting a working branch closes automatically when that branch merges.
+- A review targeting `main` remains open until someone closes it manually.
+- Closing a review deletes its synthetic branches.
+- A long-running `main` review may be created by an architect for a small number of
+  problem services, but it is not the default workflow. It uses a released version
+  as the base and updates as package changes merge into `main`.
 
 Questions answered by the current implementation:
 
@@ -529,6 +679,30 @@ Questions answered by the current implementation:
 - **Question:** Does APIView remain after ARH migration?
 
   **Answer:** No. APIView is deleted after every language is onboarded to ARH.
+
+- **Question:** Are reviews on demand or permanently open for every Package?
+
+  **Answer:** On demand by default. Long-running reviews are an exceptional option
+  for selected services.
+
+- **Question:** What happens when several reviews use different baselines but the
+  same target?
+
+  **Answer:** They remain separate, and a target change updates each affected
+  review. Approval of the target API hash satisfies the approval check regardless
+  of which baseline review produced it.
+
+- **Question:** How are concerns deferred to a later release preserved?
+
+  **Answer:** Use a tracking issue rather than keeping every review PR open or
+  creating an `approved-with-comments` state.
+
+Open questions:
+
+- [ ] Is working-branch merge the final automatic close event?
+- [ ] What should ARH do if someone manually closes a pending review?
+- [ ] Should requesting the same package, base, and target reopen a closed review or
+  return it as closed?
 
 ---
 
@@ -581,6 +755,16 @@ Questions not answered by the reviewed comments:
   or both?
 - [ ] Which release types require architecture review: first preview, preview
   update, first GA, GA update, and patch?
+
+The meeting confirmed that GA approval is required but did not settle beta policy.
+Intermediate betas may not require approval, while the first beta may require both
+package-name and initial API review. Architects may also request optional beta
+reviews. The process must choose one rule before the release-ready label can infer a
+baseline safely.
+
+Current ARH behavior for initial beta and same-hash prerelease transitions must be
+checked against that policy. Repository registration can configure same-hash
+carry-forward differently by language.
 
 ---
 
